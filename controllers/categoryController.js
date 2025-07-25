@@ -1,4 +1,6 @@
 const Category = require('../models/Category');
+const MenuItem = require('../models/MenuItem');
+const cloudinary = require('../config/cloudinary');
 
 // @desc    Get all categories
 // @route   GET /api/categories
@@ -123,25 +125,58 @@ const updateCategory = async (req, res) => {
   }
 };
 
-// @desc    Delete category
+// @desc    Delete category and its menu items
 // @route   DELETE /api/categories/:id
 // @access  Private
 const deleteCategory = async (req, res) => {
+  const categoryId = req.params.id;
+  console.log(`Attempting to delete category with ID: ${categoryId}`);
+
   try {
-    const category = await Category.findById(req.params.id);
+    const category = await Category.findById(categoryId);
 
     if (!category) {
+      console.log('Category not found.');
       return res.status(404).json({
         success: false,
         message: 'Category not found'
       });
     }
 
-    await Category.findByIdAndDelete(req.params.id);
+    // Find all menu items in the category
+    console.log(`Searching for menu items with category ID: ${categoryId}`);
+    const menuItems = await MenuItem.find({ category: categoryId });
+    console.log(`Found ${menuItems.length} menu item(s) to delete.`);
+
+
+    // Delete images from Cloudinary and the menu items from the database
+    if (menuItems.length > 0) {
+      // Collect all public IDs of images to be deleted
+      const imagePublicIds = menuItems
+        .map(item => item.image && item.image.publicId)
+        .filter(id => id); // Filter out any null or undefined IDs
+
+      if (imagePublicIds.length > 0) {
+        console.log(`Deleting ${imagePublicIds.length} image(s) from Cloudinary...`);
+        // Use Cloudinary's API to delete resources in a batch for efficiency
+        await cloudinary.api.delete_resources(imagePublicIds);
+        console.log('Cloudinary images deleted.');
+      }
+
+      // Delete all menu items associated with the category from the database
+      console.log('Deleting menu items from database...');
+      await MenuItem.deleteMany({ category: categoryId });
+      console.log('Menu items deleted from database.');
+    }
+
+    // After deleting associated items, delete the category itself
+    console.log('Deleting category from database...');
+    await Category.findByIdAndDelete(categoryId);
+    console.log('Category deleted successfully.');
 
     res.json({
       success: true,
-      message: 'Category deleted successfully'
+      message: 'Category and all associated menu items deleted successfully'
     });
   } catch (error) {
     console.error('Delete category error:', error);
